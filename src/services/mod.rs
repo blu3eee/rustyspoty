@@ -11,8 +11,6 @@ use self::auth::get_spotify_token;
 pub mod auth;
 pub mod track;
 pub mod playlist;
-// pub mod token_manager;
-// pub mod client;
 
 /// Fetches data from the Spotify API.
 ///

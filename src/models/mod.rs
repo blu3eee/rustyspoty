@@ -10,6 +10,7 @@ pub mod artist;
 pub mod album;
 pub mod playlist;
 pub mod track;
+pub mod user;
 
 #[derive(Serialize)]
 pub struct AuthRequest {
@@ -36,14 +37,6 @@ pub struct SpotifyImage {
 pub struct Followers {
     pub href: Option<String>,
     pub total: u32,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct User {
-    pub id: String,
-    pub display_name: Option<String>,
-    pub external_urls: ExternalUrls,
-    pub r#type: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

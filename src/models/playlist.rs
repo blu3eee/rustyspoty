@@ -1,6 +1,6 @@
 use serde::{ Deserialize, Serialize };
 
-use super::{ ExternalUrls, Followers, SpotifyImage, User, track::Track };
+use super::{ ExternalUrls, Followers, SpotifyImage, user::User, track::Track };
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Playlist {

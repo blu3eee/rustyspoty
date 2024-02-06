@@ -1,41 +1,32 @@
 // src/models/mod.rs
 
-use std::error::Error;
 use serde::{ Deserialize, Serialize };
 
-pub type BoxedError = Box<dyn Error + Send + Sync + 'static>;
+use self::data_change_fix::as_some_u32;
 
+pub mod page;
+// remove this when spotify fix their API response
+pub mod data_change_fix;
 pub mod recommendations;
 pub mod artist;
 pub mod album;
 pub mod playlist;
 pub mod track;
 pub mod user;
-
-#[derive(Serialize)]
-pub struct AuthRequest {
-    pub grant_type: String,
-    pub client_id: String,
-    pub client_secret: String,
-}
-
-#[derive(Deserialize)]
-pub struct AuthResponse {
-    pub access_token: String,
-    pub token_type: String,
-    pub expires_in: u64,
-}
+pub mod auth;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct SpotifyImage {
     pub url: String,
+    #[serde(deserialize_with = "as_some_u32")]
     pub height: Option<u32>,
+    #[serde(deserialize_with = "as_some_u32")]
     pub width: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Followers {
-    pub href: Option<String>,
+    // pub href: Option<String>,
     pub total: u32,
 }
 

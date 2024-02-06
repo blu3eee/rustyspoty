@@ -1,6 +1,6 @@
 use serde::{ Deserialize, Serialize };
 
-use super::{ album::SimplifiedAlbum, track::Track, ExternalUrls, Followers, SpotifyImage };
+use super::{ data_change_fix::as_u32, ExternalUrls, Followers, SpotifyImage };
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Artist {
@@ -12,11 +12,12 @@ pub struct Artist {
     pub genres: Vec<String>,
     pub r#type: String,
     pub uri: String,
-    pub popularity: u8,
+    #[serde(deserialize_with = "as_u32")]
+    pub popularity: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ArtistsResponse {
+pub struct Artists {
     pub artists: Vec<Artist>,
 }
 
@@ -24,20 +25,6 @@ pub struct ArtistsResponse {
 pub struct SimplifiedArtist {
     pub id: String,
     pub name: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ArtistAlbumsResponse {
-    pub href: String,
-    pub limit: i32,
-    pub next: Option<String>,
-    pub offset: i32,
-    pub previous: Option<String>,
-    pub total: i32,
-    pub items: Vec<SimplifiedAlbum>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ArtistTopTracksResponse {
-    pub tracks: Vec<Track>,
+    pub external_urls: ExternalUrls,
+    pub href: Option<String>,
 }

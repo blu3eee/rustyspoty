@@ -99,35 +99,35 @@ pub struct RecommendationsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_mode: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_popularity: Option<i32>,
+    pub min_popularity: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_popularity: Option<i32>,
+    pub max_popularity: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_popularity: Option<i32>,
+    pub target_popularity: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_speechiness: Option<i32>,
+    pub min_speechiness: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_speechiness: Option<i32>,
+    pub max_speechiness: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_speechiness: Option<i32>,
+    pub target_speechiness: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_tempo: Option<i32>,
+    pub min_tempo: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tempo: Option<i32>,
+    pub max_tempo: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_tempo: Option<i32>,
+    pub target_tempo: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_time_signature: Option<i32>,
+    pub min_time_signature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_time_signature: Option<i32>,
+    pub max_time_signature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_time_signature: Option<i32>,
+    pub target_time_signature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_valence: Option<i32>,
+    pub min_valence: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_valence: Option<i32>,
+    pub max_valence: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_valence: Option<i32>,
+    pub target_valence: Option<f32>,
 }
 
 impl RecommendationsRequest {

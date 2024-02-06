@@ -1,14 +1,16 @@
-use std::error::Error;
+use std::time::Duration;
 
-use reqwest::Client as ReqwestClient;
-use serde::de::DeserializeOwned;
+use reqwest::{ Client as ReqwestClient, StatusCode };
+use serde::{ de::DeserializeOwned, Serialize };
 use serde_json::Value;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
+    cache::Cache,
+    models::{ album::*, artist::*, page::Page, playlist::*, recommendations::*, track::* },
     token_manager::SpotifyTokenManager,
     RustyError,
-    SeedValidationError,
-    models::{ playlist::*, recommendations::*, track::*, artist::*, album::* },
+    RustyResult,
 };
 
 /// A client for interacting with the Spotify Web API.
@@ -20,6 +22,7 @@ pub struct SpotifyClient {
     token_manager: SpotifyTokenManager,
     /// A `reqwest::Client` for making HTTP requests.
     http_client: ReqwestClient,
+    cache: AsyncMutex<Cache<serde_json::Value>>,
 }
 
 // Define the base URL for the Spotify API as a constant
@@ -40,6 +43,7 @@ impl SpotifyClient {
         SpotifyClient {
             token_manager,
             http_client,
+            cache: AsyncMutex::new(Cache::new(Duration::from_secs(600))),
         }
     }
 
@@ -55,18 +59,70 @@ impl SpotifyClient {
     /// # Returns
     ///
     /// A `Result` containing either the deserialized response data or an error.
-    async fn get_spotify_data<T>(&mut self, path: &str) -> Result<T, RustyError>
-        where T: DeserializeOwned
+    async fn get_spotify_data<T>(&mut self, path: &str) -> RustyResult<T>
+        where
+            T: DeserializeOwned + Serialize // Ensure T can be serialized for caching
     {
-        let token: String = self.token_manager.get_valid_token().await?;
-        let url: String = format!("{SPOTIFY_API_BASE_URL}{path}");
+        let cache_key = path.to_string();
+        let cache_lock = self.cache.lock().await;
+
+        // Attempt to retrieve from cache first
+        if let Some(cached) = cache_lock.get(&cache_key) {
+            // Deserialize the cached JSON to the requested type
+            if let Ok(cached_data) = serde_json::from_value::<T>(cached.clone()) {
+                return Ok(cached_data);
+            }
+        }
+
+        // Proceed with API request if not found in cache or cache is stale
+        let token = self.token_manager.get_valid_token().await?;
+        let url = format!("{SPOTIFY_API_BASE_URL}{path}");
         let response = self.http_client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send().await?
-            .json::<T>().await?;
+            .header("Authorization", format!("Bearer {token}"))
+            .send().await?;
 
-        Ok(response)
+        // Handle rate limiting or other errors as needed here
+
+        match response.status() {
+            StatusCode::OK => {
+                let data = response.json::<T>().await?;
+                // Cache the successful response
+                let cache_lock = self.cache.lock().await;
+                cache_lock.set(cache_key, serde_json::to_value(&data)?);
+                Ok(data)
+            }
+            StatusCode::TOO_MANY_REQUESTS => {
+                if
+                    let Some(retry_after) = response
+                        .headers()
+                        .get("Retry-After")
+                        .and_then(|h| h.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                {
+                    // Convert retry_after to a Duration
+                    // let wait_time = Duration::from_secs(retry_after);
+                    // Retry the request or return an error indicating rate limiting
+                    // For simplicity, here we return a RateLimited error
+                    Err(RustyError::SpotifyRateLimited(retry_after))
+                } else {
+                    // If the Retry-After header is missing or invalid
+                    Err(
+                        RustyError::Unexpected(
+                            "Rate limited by Spotify Web API, but no retry time provided.".into()
+                        )
+                    )
+                }
+            }
+            _ => {
+                // Handle other errors based on status code
+                Err(
+                    RustyError::Unexpected(
+                        format!("API request failed with status: {}", response.status())
+                    )
+                )
+            }
+        }
     }
 
     /// Fetches detailed information about a specific album by its Spotify ID.
@@ -90,7 +146,7 @@ impl SpotifyClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_album(&mut self, album_id: &str) -> Result<Album, RustyError> {
+    pub async fn get_album(&mut self, album_id: &str) -> RustyResult<Album> {
         let path = format!("/albums/{album_id}");
         self.get_spotify_data(&path).await
     }
@@ -123,22 +179,20 @@ impl SpotifyClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_several_albums(
-        &mut self,
-        album_ids: &[String]
-    ) -> Result<AlbumsResponse, Box<dyn Error>> {
+    pub async fn get_several_albums(&mut self, album_ids: &[String]) -> RustyResult<Albums> {
+        if album_ids.len() == 0 {
+            // Convert std::io::Error to RustyError using the Io variant
+            return Err(RustyError::invalid_input("Please provide at least 1 album Id."));
+        }
         if album_ids.len() > 20 {
-            return Err(
-                Box::new(
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "Maximum of 20 IDs.")
-                )
-            );
+            // Convert std::io::Error to RustyError using the Io variant
+            return Err(RustyError::invalid_input("Maximum of 20 IDs."));
         }
 
         let ids_param = album_ids.join(",");
         let path = format!("/albums?ids={}", ids_param);
 
-        Ok(self.get_spotify_data(&path).await.map_err(|e| Box::new(e) as Box<dyn Error>)?)
+        self.get_spotify_data(&path).await
     }
 
     /// Retrieves the tracks contained in a specific album on Spotify.
@@ -169,7 +223,7 @@ impl SpotifyClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_album_tracks(&mut self, album_id: &str) -> Result<AlbumTracks, RustyError> {
+    pub async fn get_album_tracks(&mut self, album_id: &str) -> RustyResult<Page<SimplifiedTrack>> {
         let path = format!("/albums/{album_id}/tracks");
         self.get_spotify_data(&path).await
     }
@@ -207,14 +261,14 @@ impl SpotifyClient {
         &mut self,
         limit: Option<i32>,
         offset: Option<i32>
-    ) -> Result<NewAlbumsResponse, RustyError> {
+    ) -> RustyResult<NewAlbums> {
         let limit = limit.unwrap_or(20).min(50).max(1); // Ensures limit is within 1-50
         let offset = offset.unwrap_or(0).max(0); // Ensures offset is non-negative
 
         let query_params = format!("?limit={}&offset={}", limit, offset);
         let path = format!("/browse/new-releases{}", query_params);
 
-        self.get_spotify_data::<NewAlbumsResponse>(&path).await
+        self.get_spotify_data::<NewAlbums>(&path).await
     }
 
     /// Fetches detailed information about a specific artist from the Spotify API.
@@ -237,7 +291,7 @@ impl SpotifyClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_artist(&mut self, artist_id: &str) -> Result<Artist, RustyError> {
+    pub async fn get_artist(&mut self, artist_id: &str) -> RustyResult<Artist> {
         let path = format!("/artists/{artist_id}");
         self.get_spotify_data(&path).await
     }
@@ -266,32 +320,18 @@ impl SpotifyClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_several_artists(
-        &mut self,
-        artist_ids: &[String]
-    ) -> Result<ArtistsResponse, Box<dyn Error>> {
+    pub async fn get_several_artists(&mut self, artist_ids: &[String]) -> RustyResult<Artists> {
         if artist_ids.len() == 0 {
-            return Err(
-                Box::new(
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "Please provide at least 1 artist id."
-                    )
-                )
-            );
+            return Err(RustyError::invalid_input("Please provide at least 1 artist id."));
         }
         if artist_ids.len() > 50 {
-            return Err(
-                Box::new(
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "Maximum of 50 IDs.")
-                )
-            );
+            return Err(RustyError::invalid_input("Maximum of 50 IDs."));
         }
 
         let ids_param = artist_ids.join(",");
         let path = format!("/artists?ids={ids_param}");
 
-        Ok(self.get_spotify_data(&path).await.map_err(|e| Box::new(e) as Box<dyn Error>)?)
+        self.get_spotify_data(&path).await
     }
 
     /// Retrieves the albums associated with a specific artist from the Spotify catalog.
@@ -326,9 +366,9 @@ impl SpotifyClient {
     pub async fn get_artist_albums(
         &mut self,
         artist_id: &str
-    ) -> Result<ArtistAlbumsResponse, Box<dyn Error>> {
+    ) -> RustyResult<Page<SimplifiedAlbum>> {
         let path = format!("/artists/{artist_id}/albums");
-        Ok(self.get_spotify_data(&path).await.map_err(|e| Box::new(e) as Box<dyn Error>)?)
+        self.get_spotify_data(&path).await
     }
 
     /// Fetches an artist's top tracks from the Spotify catalog, optionally filtered by a specific market.
@@ -361,12 +401,10 @@ impl SpotifyClient {
         &mut self,
         artist_id: &str,
         market: Option<&str>
-    ) -> Result<ArtistTopTracksResponse, Box<dyn Error>> {
+    ) -> RustyResult<TracksResponse> {
         let market_query = market.map_or(String::new(), |m| format!("?market={}", m));
         let path = format!("/artists/{}/top-tracks{}", artist_id, market_query);
-        self.get_spotify_data::<ArtistTopTracksResponse>(&path).await.map_err(
-            |e| Box::new(e) as Box<dyn Error>
-        )
+        self.get_spotify_data::<TracksResponse>(&path).await
     }
 
     /// Fetches a list of artists related to a specified artist from the Spotify API.
@@ -391,10 +429,7 @@ impl SpotifyClient {
     /// # }
     /// ```
     /// This function helps users explore the music landscape by introducing them to artists similar to their favorites.
-    pub async fn get_related_artists(
-        &mut self,
-        artist_id: &str
-    ) -> Result<ArtistsResponse, RustyError> {
+    pub async fn get_related_artists(&mut self, artist_id: &str) -> Result<Artists, RustyError> {
         let path: String = format!("/artists/{}/related-artists", artist_id);
         self.get_spotify_data(&path).await
     }
@@ -475,31 +510,20 @@ impl SpotifyClient {
         &mut self,
         track_ids: &[String],
         market: Option<&str>
-    ) -> Result<TracksResponse, Box<dyn Error>> {
+    ) -> RustyResult<TracksResponse> {
         if track_ids.len() == 0 {
-            return Err(
-                Box::new(
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "Need at least 1 track ID."
-                    )
-                )
-            );
+            return Err(RustyError::invalid_input("Need at least 1 track ID."));
+        }
+        if track_ids.len() > 20 {
+            return Err(RustyError::invalid_input("Maximum of 50 IDs."));
         }
 
-        if track_ids.len() > 20 {
-            return Err(
-                Box::new(
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "Maximum of 50 IDs.")
-                )
-            );
-        }
         let market_query = market.map_or(String::new(), |m| format!("&market={}", m));
 
         let ids_param = track_ids.join(",");
         let path = format!("/tracks?ids={ids_param}{market_query}");
 
-        Ok(self.get_spotify_data(&path).await.map_err(|e| Box::new(e) as Box<dyn Error>)?)
+        self.get_spotify_data(&path).await
     }
 
     /// Fetches track recommendations based on specified criteria from the Spotify API.
@@ -534,7 +558,7 @@ impl SpotifyClient {
     pub async fn get_recommendations(
         &mut self,
         request: &RecommendationsRequest
-    ) -> Result<RecommendationsResponse, Box<dyn Error>> {
+    ) -> RustyResult<RecommendationsResponse> {
         // Validation logic for seeds
         let total_seeds: usize =
             request.seed_artists.as_ref().map_or(0, Vec::len) +
@@ -547,7 +571,7 @@ impl SpotifyClient {
             } else {
                 "No more than 5 seeds in total are allowed."
             };
-            return Err(Box::new(SeedValidationError::new(err_msg)));
+            return Err(RustyError::invalid_input(err_msg));
         }
 
         // Serialize the request object to a JSON value
@@ -557,12 +581,7 @@ impl SpotifyClient {
         let query_params: String = self.to_query_string(&request_json);
         let path: String = format!("/recommendations?{}", query_params);
 
-        // Use the `get_spotify_data` method to make the request
-        Ok(
-            self
-                .get_spotify_data::<RecommendationsResponse>(&path).await
-                .map_err(|e| Box::new(e) as Box<dyn Error>)?
-        )
+        self.get_spotify_data::<RecommendationsResponse>(&path).await
     }
 
     /// Fetches data for a specific playlist from the Spotify API.
@@ -584,7 +603,7 @@ impl SpotifyClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_playlist(&mut self, playlist_id: &str) -> Result<Playlist, RustyError> {
+    pub async fn get_playlist(&mut self, playlist_id: &str) -> RustyResult<Playlist> {
         let path = format!("/playlists/{playlist_id}");
         self.get_spotify_data(&path).await
     }

@@ -1,6 +1,6 @@
 // src/queries/auth.rs
 
-use crate::models::{ AuthResponse, AuthRequest };
+use crate::models::auth::{ AuthResponse, AuthRequest };
 
 pub async fn get_spotify_token(
     client_id: &str,

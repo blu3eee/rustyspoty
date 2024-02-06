@@ -3,9 +3,9 @@
 pub mod models;
 mod services;
 
-mod client;
+mod client_creds;
 mod token_manager;
 mod error;
 mod cache;
 
-pub use self::{ client::*, token_manager::*, error::*, services::* };
+pub use self::{ client_creds::*, token_manager::*, error::*, services::* };

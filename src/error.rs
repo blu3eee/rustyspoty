@@ -14,6 +14,7 @@ pub enum RustyError {
     Network(reqwest::Error),
     /// Represents errors that occur while parsing JSON data.
     ParseJson(serde_json::Error),
+    /// Represents errors with input or output data.
     Io(std::io::Error),
     /// Represents errors related to token authentication failures.
     TokenAuthentication(String),

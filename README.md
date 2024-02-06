@@ -52,6 +52,4 @@ Contributions to rustyspoty are welcome! Whether it's bug reports, feature reque
 
 ## License
 
-This project is licensed under the GNU General Public License Version 3 (GPLv3) - see the [LICENSE](LICENSE) file for details.
-
-For more information on GPLv3, please visit [https://www.gnu.org/licenses/gpl-3.0.html](https://www.gnu.org/licenses/gpl-3.0.html).
+[GPLv3](https://github.com/bluesimp1102/rustyspoty/blob/main/LICENSE)

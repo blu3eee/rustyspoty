@@ -1,4 +1,4 @@
-use crate::{ models::{ AuthRequest, AuthResponse }, RustyError };
+use crate::{ models::auth::{ AuthRequest, AuthResponse }, RustyError };
 use std::time::{ SystemTime, UNIX_EPOCH };
 
 /// Manages authentication tokens for Spotify API.

@@ -8,9 +8,11 @@ use serde::de::DeserializeOwned;
 
 use self::auth::get_spotify_token;
 
-pub mod auth;
-pub mod track;
-pub mod playlist;
+mod auth;
+mod track;
+mod playlist;
+
+pub use self::{ auth::*, track::*, playlist::* };
 
 /// Fetches data from the Spotify API.
 ///

@@ -15,20 +15,59 @@ use crate::{
 
 /// A client for interacting with the Spotify Web API.
 ///
-/// This client encapsulates the process of making requests to the Spotify API,
-/// including handling authentication through the `SpotifyTokenManager`.
-pub struct SpotifyClient {
-    /// Manages the Spotify API authentication tokens.
+/// This client simplifies the process of making authenticated requests to the Spotify API. It handles
+/// OAuth token management, caching of responses to reduce load and improve performance, and provides
+/// a unified interface for various Spotify API endpoints. The client supports server-to-server
+/// interactions with Spotify, where user authorization is not required.
+///
+/// The `SpotifyClient` includes a token manager for handling OAuth tokens, a `reqwest` HTTP client for
+/// making requests, and a cache for storing and retrieving API responses. The cache reduces the
+/// number of requests made to the Spotify API by temporarily storing data that is likely to be reused.
+///
+/// # Examples
+///
+/// Basic usage:
+///
+/// ```
+/// use rustyspoty::SpotifyClient;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let client_id = "your_spotify_client_id".to_string();
+///     let client_secret = "your_spotify_client_secret".to_string();
+///
+///     // Create a new SpotifyClient instance.
+///     let mut spotify_client = SpotifyClient::new(client_id, client_secret);
+///
+///     // Example: Fetch details for a specific album.
+///     let album_id = "4aawyAB9vmqN3uQ7FjRGTy";
+///     match spotify_client.get_album(album_id).await {
+///         Ok(album) => println!("Album Name: {}", album.name),
+///         Err(e) => eprintln!("Error occurred: {}", e),
+///     }
+/// }
+/// ```
+///
+/// The client automatically handles token refreshes and caches responses for efficient use.
+pub struct SpotifyClientCredentials {
+    /// Manages the Spotify API authentication tokens, abstracting away the details of token
+    /// acquisition, refresh, and storage.
     token_manager: SpotifyTokenManager,
-    /// A `reqwest::Client` for making HTTP requests.
+
+    /// A `reqwest::Client` instance for making HTTP requests. This client is used to send requests
+    /// to the Spotify Web API, handling aspects like setting request headers and parsing responses.
     http_client: ReqwestClient,
-    cache: AsyncMutex<Cache<serde_json::Value>>,
+
+    /// A cache for storing responses from the Spotify API. The cache aims to reduce the number of
+    /// API requests by reusing previously fetched data. The cache stores data as `serde_json::Value`,
+    /// allowing for flexible handling of different response structures.
+    cache: AsyncMutex<Cache<Value>>,
 }
 
 // Define the base URL for the Spotify API as a constant
 const SPOTIFY_API_BASE_URL: &str = "https://api.spotify.com/v1";
 
-impl SpotifyClient {
+impl SpotifyClientCredentials {
     /// Creates a new instance of `SpotifyClient`.
     ///
     /// Initializes the client with client ID and secret for authentication.
@@ -40,7 +79,7 @@ impl SpotifyClient {
     pub fn new(client_id: String, client_secret: String) -> Self {
         let token_manager: SpotifyTokenManager = SpotifyTokenManager::new(client_id, client_secret);
         let http_client: ReqwestClient = ReqwestClient::new();
-        SpotifyClient {
+        SpotifyClientCredentials {
             token_manager,
             http_client,
             cache: AsyncMutex::new(Cache::new(Duration::from_secs(600))),
@@ -137,7 +176,8 @@ impl SpotifyClient {
     /// * Returns an error for invalid album ID, network issues, or problems with the Spotify API.
     ///
     /// # Example
-    /// ```no_run
+    /// ```
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut spotify_client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let album_id = "1DFixLWuPkv3KT3TnV35m3";
@@ -166,10 +206,10 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
-    /// let album_ids = ["1o2NpYGqHiCq7FoiYdyd1x", "4tZwfgrHOc3mvqYlEYSvVi"];
+    /// let album_ids = ["1o2NpYGqHiCq7FoiYdyd1x".to_string(), "4tZwfgrHOc3mvqYlEYSvVi".to_string()];
     /// let result = client.get_several_albums(&album_ids).await;
     /// if let Ok(albums_response) = result {
     ///     for album in albums_response.albums {
@@ -210,7 +250,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let album_id = "4aawyAB9vmqN3uQ7FjRGTy";
@@ -243,7 +283,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let album_id = "3ThQkHrQ6FSq8VIBv3WIEs";
@@ -283,7 +323,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let artist = client.get_artist("artist_id").await?;
@@ -309,7 +349,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let artist_ids = vec!["artist_id1".to_string(), "artist_id2".to_string()];
@@ -347,8 +387,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
-    /// # use spotify_client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut spotify_client = SpotifyClient::new("your_client_id".to_string(), "your_client_secret".to_string());
     /// let artist_id = "4tZwfgrHOc3mvqYlEYSvVi"; // Example artist ID for Daft Punk
@@ -385,7 +424,7 @@ impl SpotifyClient {
     /// # Example
     ///
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut spotify_client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let artist_id = "0TnOYISbd1XYRBk9myaseg";
@@ -419,7 +458,7 @@ impl SpotifyClient {
     ///
     /// # Examples
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let artist_id = "3TVXtAsR1Inumwj472S9r4";
@@ -442,7 +481,7 @@ impl SpotifyClient {
     ///
     /// # Examples
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let genre_seeds = client.get_genre_seeds().await?;
@@ -467,7 +506,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let track_id = "11dFghVXANMlKmJXsNCbNl";
@@ -495,7 +534,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let track_ids = vec!["track_id1".to_string(), "track_id2".to_string()];
@@ -541,7 +580,7 @@ impl SpotifyClient {
     /// # Examples
     ///
     /// ```
-    /// # use rustyspoty::{services::client::SpotifyClient, models::recommendations::RecommendationsRequest};
+    /// # use rustyspoty::{SpotifyClient, models::recommendations::RecommendationsRequest};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut spotify_client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let mut request = RecommendationsRequest::new();
@@ -594,7 +633,7 @@ impl SpotifyClient {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::services::client::SpotifyClient;
+    /// # use rustyspoty::SpotifyClient;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
     /// let playlist_id = "37i9dQZF1DXcBWIGoYBM5M";
@@ -644,14 +683,14 @@ mod tests {
     use std::env;
     // use serde_json::json;
 
-    fn setup() -> SpotifyClient {
+    fn setup() -> SpotifyClientCredentials {
         dotenv::dotenv().ok();
         // Setup
         let client_id: String = env::var("SPOTIFY_CLIENT_ID").expect("Expected a client id");
         let client_secret: String = env
             ::var("SPOTIFY_CLIENT_SECRET")
             .expect("Expected a client secret");
-        SpotifyClient::new(client_id, client_secret)
+        SpotifyClientCredentials::new(client_id, client_secret)
     }
 
     #[tokio::test]

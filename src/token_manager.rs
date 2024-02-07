@@ -1,4 +1,4 @@
-use crate::{ models::auth::{ AuthRequest, AuthResponse }, RustyError };
+use crate::{ models::auth::{ ClientCredsAuthRequest, ClientCredsAuthResponse }, RustyError };
 use std::time::{ SystemTime, UNIX_EPOCH };
 
 /// Manages authentication tokens for Spotify API.
@@ -49,7 +49,7 @@ impl SpotifyTokenManager {
         let response = client
             .post("https://accounts.spotify.com/api/token")
             .form(
-                &(AuthRequest {
+                &(ClientCredsAuthRequest {
                     grant_type: "client_credentials".to_owned(),
                     client_id: self.client_id.clone(),
                     client_secret: self.client_secret.clone(),
@@ -66,7 +66,7 @@ impl SpotifyTokenManager {
             return Err(RustyError::TokenAuthentication(error_message));
         }
 
-        let res = response.json::<AuthResponse>().await?;
+        let res = response.json::<ClientCredsAuthResponse>().await?;
 
         // Update the token and expiration time, subtracting 60 seconds to account for potential timing issues
         self.access_token = Some(res.access_token);

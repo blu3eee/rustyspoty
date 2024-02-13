@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{ fmt::Debug, time::Duration };
 
 use reqwest::{ Client as ReqwestClient, StatusCode };
 use serde::{ de::DeserializeOwned, Serialize };
@@ -100,18 +100,21 @@ impl SpotifyClientCredentials {
     /// A `Result` containing either the deserialized response data or an error.
     async fn get_spotify_data<T>(&mut self, path: &str) -> RustyResult<T>
         where
-            T: DeserializeOwned + Serialize // Ensure T can be serialized for caching
+            T: DeserializeOwned + Serialize + Debug // Ensure T can be serialized for caching
     {
         let cache_key = path.to_string();
-        let cache_lock = self.cache.lock().await;
 
         // Attempt to retrieve from cache first
-        if let Some(cached) = cache_lock.get(&cache_key) {
-            // Deserialize the cached JSON to the requested type
-            if let Ok(cached_data) = serde_json::from_value::<T>(cached.clone()) {
-                return Ok(cached_data);
+        {
+            // Scope for the cache lock to ensure it's dropped before await points
+            let cache_lock = self.cache.lock().await;
+            if let Some(cached) = cache_lock.get(&cache_key) {
+                // Deserialize the cached JSON to the requested type
+                if let Ok(cached_data) = serde_json::from_value::<T>(cached.clone()) {
+                    return Ok(cached_data);
+                }
             }
-        }
+        } // Cache lock is dropped here
 
         // Proceed with API request if not found in cache or cache is stale
         let token = self.token_manager.get_valid_token().await?;
@@ -122,13 +125,14 @@ impl SpotifyClientCredentials {
             .send().await?;
 
         // Handle rate limiting or other errors as needed here
-
         match response.status() {
             StatusCode::OK => {
                 let data = response.json::<T>().await?;
-                // Cache the successful response
-                let cache_lock = self.cache.lock().await;
-                cache_lock.set(cache_key, serde_json::to_value(&data)?);
+                {
+                    // Scope for the cache lock to ensure it's dropped right after use
+                    let cache_lock = self.cache.lock().await;
+                    cache_lock.set(cache_key, serde_json::to_value(&data)?);
+                } // Cache lock is dropped here
                 Ok(data)
             }
             StatusCode::TOO_MANY_REQUESTS => {
@@ -696,6 +700,9 @@ mod tests {
     #[tokio::test]
     async fn test_client() {
         let mut client = setup();
+
+        let genres_result = client.get_genre_seeds().await;
+        assert!(genres_result.is_ok());
 
         // Test fetching a track
         let track_result = client.get_track("4iV5W9uYEdYUVa79Axb7Rh").await;

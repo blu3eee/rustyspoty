@@ -716,7 +716,7 @@ impl SpotifyClientCredentials {
 
         // Update cache with fetched tracks
         for track in &fetched_tracks.tracks {
-            let cache_key = format!("/tracks/{}/{}", track.id, market.unwrap_or_default());
+            let cache_key = format!("/tracks/{}", track.id);
             self.update_cache(cache_key, serde_json::to_value(track)?).await;
         }
 
@@ -725,9 +725,10 @@ impl SpotifyClientCredentials {
         Ok(TracksResponse { tracks: combined_tracks })
     }
 
-    /// Fetches track recommendations based on specified criteria from the Spotify API.
+    /// Fetches track recommendations based on specified criteria from the Spotify API, utilizing caching to optimize performance.
     ///
-    /// This function allows you to generate a list of recommended tracks based on seed artists, tracks, genres, and tunable track attributes. It's ideal for creating personalized music recommendations for users.
+    /// This function generates a list of recommended tracks based on seed artists, tracks, genres, and tunable track attributes.
+    /// It leverages caching to store and reuse data for previously fetched recommendations, reducing the number of API requests and improving response times.
     ///
     /// # Arguments
     ///
@@ -735,11 +736,18 @@ impl SpotifyClientCredentials {
     ///
     /// # Returns
     ///
-    /// * `Result<RecommendationsResponse, Box<dyn Error>>`: On success, it returns a `RecommendationsResponse` containing recommended tracks and their details. On error, it returns a `Box<dyn Error>` detailing what went wrong, such as invalid seed data or API request issues.
+    /// * `RustyResult<RecommendationsResponse>`: On success, it returns a `RecommendationsResponse` containing recommended tracks and their details.
+    /// On error, it returns a `RustyError` detailing what went wrong, such as invalid seed data or API request issues.
+    ///
+    /// # Caching:
+    ///
+    /// The function checks the cache for existing recommendations matching the request criteria before querying the Spotify API.
+    /// If cached data is found and it's not expired, the function returns the cached data instead of making a new API request.
+    /// After fetching recommendations from the API, the function updates the cache with the new data of tracks for future use.
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust
     /// # use rustyspoty::{SpotifyClientCredentials, models::recommendations::RecommendationsRequest};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # let mut spotify_client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
@@ -780,7 +788,14 @@ impl SpotifyClientCredentials {
         let query_params: String = self.to_query_string(&request_json);
         let path: String = format!("/recommendations?{}", query_params);
 
-        self.get_spotify_data::<RecommendationsResponse>(&path).await
+        let response = self.get_spotify_data::<RecommendationsResponse>(&path).await?;
+        // Update cache with fetched tracks
+        for track in &response.tracks {
+            let cache_key = format!("/tracks/{}", track.id);
+            self.update_cache(cache_key, serde_json::to_value(track)?).await;
+        }
+
+        Ok(response)
     }
 
     /// Fetches data for a specific playlist from the Spotify API.

@@ -809,26 +809,61 @@ impl SpotifyClientCredentials {
 
     /// Converts a `serde_json::Value` into a URL-encoded query string.
     ///
-    /// This utility function is used internally to convert API parameters stored in a `serde_json::Value` into a string format suitable for HTTP query parameters.
+    /// This utility function is designed to serialize API parameters stored in a `serde_json::Value`
+    /// into a string format suitable for use as HTTP query parameters. It supports arrays, strings,
+    /// numbers, and booleans, accurately representing these types in the query string. This ensures
+    /// that API requests can include a diverse range of parameters.
     ///
     /// # Arguments
-    /// * `params` - A `serde_json::Value` representing the JSON object containing the query parameters.
+    /// * `params` - A `serde_json::Value` representing the JSON object with the API query parameters.
     ///
     /// # Returns
-    /// * `String`: A URL-encoded string representing the query parameters.
-    fn to_query_string(&self, params: &Value) -> String {
+    /// * `String` - A URL-encoded string of the query parameters.
+    ///
+    /// # Examples
+    ///
+    /// Converting a JSON object with various types of parameters into a query string:
+    ///
+    /// ```
+    /// # use rustyspoty::SpotifyClientCredentials;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
+    /// let params = serde_json::json!({
+    ///     "limit": 10,
+    ///     "seed_genres": ["acoustic", "afrobeat"],
+    ///     "market": "US",
+    ///     "min_energy": 0.4
+    /// });
+    ///
+    /// let query_string = client.to_query_string(&params);
+    /// assert_eq!(query_string, "limit=10&seed_genres=acoustic,afrobeat&market=US&min_energy=0.4");
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Note: This function ignores null values and objects, focusing on directly serializable types.
+    pub fn to_query_string(&self, params: &Value) -> String {
         params.as_object().map_or_else(String::new, |obj| {
             obj.iter()
                 .filter_map(|(key, value)| {
-                    if value.is_array() {
-                        let vals: Vec<String> = value
-                            .as_array()?
-                            .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect();
-                        Some(format!("{}={}", key, vals.join(",")))
-                    } else {
-                        value.as_str().map(|v| format!("{}={}", key, v))
+                    match value {
+                        Value::Array(vals) => {
+                            // Handle arrays: join their string representations with commas
+                            let vals_str: Vec<String> = vals
+                                .iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect();
+                            Some(format!("{}={}", key, vals_str.join(",")))
+                        }
+                        Value::String(str_val) => {
+                            // Handle strings directly
+                            Some(format!("{}={}", key, str_val))
+                        }
+                        // Handle numerical and boolean values by converting them to strings
+                        Value::Number(num_val) => Some(format!("{}={}", key, num_val)),
+                        Value::Bool(bool_val) => Some(format!("{}={}", key, bool_val)),
+                        // Ignore other types (e.g., null, objects)
+                        _ => None,
                     }
                 })
                 .collect::<Vec<String>>()
@@ -885,8 +920,11 @@ mod tests {
         recommendations_request.seed_genres = Some(
             genre_seeds_result.unwrap().genres[0..2].to_vec()
         );
+        recommendations_request.limit = Some(10);
+
         let recommendations_result = client.get_recommendations(&recommendations_request).await;
         assert!(recommendations_result.is_ok());
+        dbg!(recommendations_result.unwrap().tracks.len());
 
         // Extend with more tests as needed
     }

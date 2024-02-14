@@ -29,7 +29,7 @@ use crate::{
 /// Basic usage:
 ///
 /// ```
-/// use rustyspoty::SpotifyClient;
+/// use rustyspoty::SpotifyClientCredentials;
 ///
 /// #[tokio::main]
 /// async fn main() {
@@ -37,7 +37,7 @@ use crate::{
 ///     let client_secret = "your_spotify_client_secret".to_string();
 ///
 ///     // Create a new SpotifyClient instance.
-///     let mut spotify_client = SpotifyClient::new(client_id, client_secret);
+///     let mut spotify_client = SpotifyClientCredentials::new(client_id, client_secret);
 ///
 ///     // Example: Fetch details for a specific album.
 ///     let album_id = "4aawyAB9vmqN3uQ7FjRGTy";
@@ -84,6 +84,50 @@ impl SpotifyClientCredentials {
             http_client,
             cache: AsyncMutex::new(Cache::new(Duration::from_secs(600))),
         }
+    }
+
+    /// Updates the cache with a new value for a given key or inserts it if the key does not exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key under which to store the value in the cache.
+    /// * `value` - The value to store, of generic type `T`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rustyspoty::SpotifyClientCredentials;
+    /// # async fn example() {
+    /// # let mut client_credentials = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
+    /// client_credentials.update_cache("artist:1".to_string(), serde_json::json!({"name": "Artist Name"})).await;
+    /// # }
+    /// ```
+    pub async fn update_cache(&self, key: String, value: Value) {
+        self.cache.lock().await.set(key, value);
+    }
+
+    /// Retrieves a value from the cache if it exists and has not expired.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key of the cache entry to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<T>` which is `Some(T)` if the key exists and has not expired, or `None` if the key does not exist or has expired.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rustyspoty::SpotifyClientCredentials;
+    /// # async fn example() -> Option<serde_json::Value> {
+    /// # let mut client_credentials = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
+    /// let value = client_credentials.check_cache("artist:1").await;
+    /// value
+    /// # }
+    /// ```
+    pub async fn check_cache(&self, key: &str) -> Option<Value> {
+        self.cache.lock().await.get(key)
     }
 
     /// Performs a GET request to the specified Spotify API endpoint.
@@ -181,9 +225,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut spotify_client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut spotify_client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let album_id = "1DFixLWuPkv3KT3TnV35m3";
     /// let album = spotify_client.get_album(album_id).await?;
     /// println!("Album name: {}", album.name);
@@ -197,22 +241,36 @@ impl SpotifyClientCredentials {
 
     /// Fetches detailed information for several albums based on their Spotify IDs.
     ///
-    /// Useful for retrieving data about multiple albums in one request. This method optimizes data fetching by minimizing the number of API calls needed to retrieve album information.
+    /// This method first checks if the requested album information is available in the cache
+    /// and not expired. If so, it returns the cached data directly, minimizing the number
+    /// of API calls. For any albums not found in the cache or if the cached data is expired,
+    /// it fetches the data from the Spotify API, updates the cache with the new data, and
+    /// returns the combined results.
     ///
     /// # Arguments
     /// * `album_ids`: A slice of Spotify album IDs. Each ID must correspond to an album on Spotify.
     ///
     /// # Returns
-    /// * `Result<AlbumsResponse, Box<dyn Error>>`: On success, returns an `AlbumsResponse` containing detailed information about each requested album. On error, returns a boxed error detailing the failure, such as exceeding the maximum number of IDs allowed.
+    /// * `RustyResult<Albums>`: On success, returns an `Albums` object containing detailed
+    ///   information about each requested album. On failure, returns a `RustyError` detailing
+    ///   the issue, such as exceeding the maximum number of IDs allowed.
     ///
     /// # Errors
-    /// * Returns an error if the provided list of album IDs exceeds 20, as this is the Spotify API's limit for this type of request.
+    /// * Returns an error if the provided list of album IDs is empty or exceeds 20, as this is
+    ///   the Spotify API's limit for this type of request.
+    /// * Returns a `RustyError::InvalidInput` for invalid input parameters.
+    ///
+    /// # Caching
+    /// * The method optimizes data fetching by leveraging a caching mechanism. It checks the cache
+    ///   for each requested album ID and uses the cached data if available and not expired.
+    /// * For any missing or expired albums, it fetches the data for all requested albums from the
+    ///   Spotify API and updates the cache accordingly.
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let album_ids = ["1o2NpYGqHiCq7FoiYdyd1x".to_string(), "4tZwfgrHOc3mvqYlEYSvVi".to_string()];
     /// let result = client.get_several_albums(&album_ids).await;
     /// if let Ok(albums_response) = result {
@@ -224,19 +282,45 @@ impl SpotifyClientCredentials {
     /// # }
     /// ```
     pub async fn get_several_albums(&mut self, album_ids: &[String]) -> RustyResult<Albums> {
-        if album_ids.len() == 0 {
-            // Convert std::io::Error to RustyError using the Io variant
-            return Err(RustyError::invalid_input("Please provide at least 1 album Id."));
+        if album_ids.is_empty() {
+            return Err(RustyError::invalid_input("Please provide at least 1 album ID."));
         }
         if album_ids.len() > 20 {
-            // Convert std::io::Error to RustyError using the Io variant
             return Err(RustyError::invalid_input("Maximum of 20 IDs."));
         }
 
+        let mut albums_to_fetch = Vec::new();
+        let mut albums_from_cache = Vec::new();
+
+        // Check cache first
+        for id in album_ids {
+            let cache_key = format!("/albums/{id}");
+            if let Some(cached_album) = self.check_cache(&cache_key).await {
+                albums_from_cache.push(serde_json::from_value::<Album>(cached_album)?);
+            } else {
+                albums_to_fetch.push(id.clone());
+            }
+        }
+
+        // If all albums were found in cache, return them directly
+        if albums_to_fetch.is_empty() {
+            return Ok(Albums { albums: albums_from_cache });
+        }
+
+        // Fetch missing albums from Spotify API
         let ids_param = album_ids.join(",");
         let path = format!("/albums?ids={}", ids_param);
+        let fetched_albums: Albums = self.get_spotify_data(&path).await?;
 
-        self.get_spotify_data(&path).await
+        // Update cache with fetched albums
+        for album in &fetched_albums.albums {
+            let cache_key = format!("/albums/{}", album.id);
+            self.update_cache(cache_key, serde_json::to_value(album)?).await;
+        }
+
+        // Combine cached albums with fetched albums before returning
+        let combined_albums = [albums_from_cache, fetched_albums.albums].concat();
+        Ok(Albums { albums: combined_albums })
     }
 
     /// Retrieves the tracks contained in a specific album on Spotify.
@@ -254,9 +338,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let album_id = "4aawyAB9vmqN3uQ7FjRGTy";
     /// let result = client.get_album_tracks(album_id).await;
     /// if let Ok(album_tracks) = result {
@@ -287,9 +371,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let album_id = "3ThQkHrQ6FSq8VIBv3WIEs";
     /// let result = client.get_album(album_id).await;
     /// match result {
@@ -327,9 +411,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let artist = client.get_artist("artist_id").await?;
     /// println!("Artist Name: {}", artist.name);
     /// # Ok(())
@@ -342,20 +426,34 @@ impl SpotifyClientCredentials {
 
     /// Retrieves information for multiple artists based on their Spotify IDs.
     ///
+    /// This method first checks if the requested artist information is available in the cache
+    /// and not expired. If so, it returns the cached data directly, minimizing the number
+    /// of API calls. For any artists not found in the cache or if the cached data is expired,
+    /// it fetches the data from the Spotify API, updates the cache with the new data, and
+    /// returns the combined results.
+    ///
     /// # Arguments
     /// * `artist_ids` - A slice of Spotify IDs for the artists. Maximum of 50 IDs allowed.
     ///
     /// # Returns
-    /// * `Result<ArtistsResponse, Box<dyn Error>>`: On success, returns an `ArtistsResponse` containing a list of artists. On failure, returns an error detailing why the request failed.
+    /// * `RustyResult<Artists>`: On success, returns an `Artists` object containing detailed
+    ///   information about each requested artist. On failure, returns a `RustyError` detailing
+    ///   the issue.
     ///
     /// # Errors
     /// * Returns an error if no artist IDs are provided or if the number of IDs exceeds the limit of 50.
     ///
+    /// # Caching
+    /// * The method leverages a caching mechanism to optimize data fetching. It checks the cache
+    ///   for each requested artist ID and uses the cached data if available and not expired.
+    /// * For any missing or expired artists, it fetches the data from the Spotify API and updates
+    ///   the cache accordingly.
+    ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let artist_ids = vec!["artist_id1".to_string(), "artist_id2".to_string()];
     /// let artists = client.get_several_artists(&artist_ids).await?;
     /// for artist in artists.artists {
@@ -365,17 +463,45 @@ impl SpotifyClientCredentials {
     /// # }
     /// ```
     pub async fn get_several_artists(&mut self, artist_ids: &[String]) -> RustyResult<Artists> {
-        if artist_ids.len() == 0 {
-            return Err(RustyError::invalid_input("Please provide at least 1 artist id."));
+        if artist_ids.is_empty() {
+            return Err(RustyError::invalid_input("Please provide at least 1 artist ID."));
         }
         if artist_ids.len() > 50 {
             return Err(RustyError::invalid_input("Maximum of 50 IDs."));
         }
 
-        let ids_param = artist_ids.join(",");
-        let path = format!("/artists?ids={ids_param}");
+        let mut artists_to_fetch = Vec::new();
+        let mut artists_from_cache = Vec::new();
 
-        self.get_spotify_data(&path).await
+        // Check cache first
+        for id in artist_ids {
+            let cache_key = format!("/artists/{id}");
+            if let Some(cached_artist) = self.check_cache(&cache_key).await {
+                artists_from_cache.push(serde_json::from_value::<Artist>(cached_artist)?);
+            } else {
+                artists_to_fetch.push(id.clone());
+            }
+        }
+
+        // If all artists were found in cache, return them directly
+        if artists_to_fetch.is_empty() {
+            return Ok(Artists { artists: artists_from_cache });
+        }
+
+        // Fetch missing artists from Spotify API
+        let ids_param = artists_to_fetch.join(",");
+        let path = format!("/artists?ids={ids_param}");
+        let fetched_artists: Artists = self.get_spotify_data(&path).await?;
+
+        // Update cache with fetched artists
+        for artist in &fetched_artists.artists {
+            let cache_key = format!("/artists/{}", artist.id);
+            self.update_cache(cache_key, serde_json::to_value(artist)?).await;
+        }
+
+        // Combine cached artists with fetched artists before returning
+        let combined_artists = [artists_from_cache, fetched_artists.artists].concat();
+        Ok(Artists { artists: combined_artists })
     }
 
     /// Retrieves the albums associated with a specific artist from the Spotify catalog.
@@ -391,9 +517,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut spotify_client = SpotifyClient::new("your_client_id".to_string(), "your_client_secret".to_string());
+    /// # let mut spotify_client = SpotifyClientCredentials::new("your_client_id".to_string(), "your_client_secret".to_string());
     /// let artist_id = "4tZwfgrHOc3mvqYlEYSvVi"; // Example artist ID for Daft Punk
     /// match spotify_client.get_artist_albums(artist_id).await {
     ///     Ok(response) => {
@@ -428,9 +554,9 @@ impl SpotifyClientCredentials {
     /// # Example
     ///
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut spotify_client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut spotify_client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let artist_id = "0TnOYISbd1XYRBk9myaseg";
     /// let market = Some("US");
     /// let top_tracks = spotify_client.get_artist_top_tracks(artist_id, market).await?;
@@ -462,9 +588,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Examples
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let artist_id = "3TVXtAsR1Inumwj472S9r4";
     /// let related_artists = client.get_related_artists(artist_id).await?;
     /// println!("Related Artists: {:?}", related_artists);
@@ -485,9 +611,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Examples
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let genre_seeds = client.get_genre_seeds().await?;
     /// println!("Available Genre Seeds: {:?}", genre_seeds);
     /// # Ok(())
@@ -510,9 +636,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let track_id = "11dFghVXANMlKmJXsNCbNl";
     /// let track = client.get_track(track_id).await?;
     /// println!("Track Name: {}", track.name);
@@ -524,23 +650,26 @@ impl SpotifyClientCredentials {
         self.get_spotify_data(&path).await
     }
 
-    /// Fetches detailed information for multiple tracks based on their Spotify IDs, optionally filtered by market.
+    /// Fetches detailed information for multiple tracks based on their Spotify IDs,
+    /// using caching to optimize API usage.
     ///
     /// # Arguments
     /// * `track_ids` - A slice of Spotify IDs for the tracks.
-    /// * `market` - An optional ISO 3166-1 alpha-2 country code to specify the market. Tracks will be returned only if they are available in that market.
+    /// * `market` - An optional market code to filter tracks available in a specific market.
     ///
     /// # Returns
-    /// * `Result<TracksResponse, Box<dyn Error>>` - On success, returns a collection of track data wrapped in `TracksResponse`. On failure, returns an error.
+    /// * `RustyResult<TracksResponse>`: On success, returns a `TracksResponse` object containing detailed
+    ///   information about each requested track. On failure, returns a `RustyError` detailing the issue.
     ///
-    /// # Errors
-    /// * Returns an error if no track ID is provided or if the number of track IDs exceeds the limit of 20.
+    /// # Caching
+    /// * Checks the cache for each requested track ID and uses cached data if available and valid.
+    /// * Updates the cache with new data fetched from the Spotify API for missing or expired tracks.
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let track_ids = vec!["track_id1".to_string(), "track_id2".to_string()];
     /// let tracks = client.get_several_tracks(&track_ids, Some("US")).await?;
     /// for track in tracks.tracks {
@@ -554,19 +683,46 @@ impl SpotifyClientCredentials {
         track_ids: &[String],
         market: Option<&str>
     ) -> RustyResult<TracksResponse> {
-        if track_ids.len() == 0 {
-            return Err(RustyError::invalid_input("Need at least 1 track ID."));
+        if track_ids.is_empty() {
+            return Err(RustyError::invalid_input("Please provide at least 1 track ID."));
         }
         if track_ids.len() > 20 {
-            return Err(RustyError::invalid_input("Maximum of 50 IDs."));
+            return Err(RustyError::invalid_input("Maximum of 20 IDs."));
         }
 
         let market_query = market.map_or(String::new(), |m| format!("&market={}", m));
+        let mut tracks_to_fetch = Vec::new();
+        let mut tracks_from_cache: Vec<Track> = Vec::new();
 
-        let ids_param = track_ids.join(",");
+        // Check cache first
+        for id in track_ids {
+            let cache_key = format!("/tracks/{id}{market_query}");
+            if let Some(cached_track) = self.check_cache(&cache_key).await {
+                tracks_from_cache.push(serde_json::from_value::<Track>(cached_track)?);
+            } else {
+                tracks_to_fetch.push(id.clone());
+            }
+        }
+
+        // If all tracks were found in cache, return them directly
+        if tracks_to_fetch.is_empty() {
+            return Ok(TracksResponse { tracks: tracks_from_cache });
+        }
+
+        // Fetch missing tracks from Spotify API
+        let ids_param = tracks_to_fetch.join(",");
         let path = format!("/tracks?ids={ids_param}{market_query}");
+        let fetched_tracks: TracksResponse = self.get_spotify_data(&path).await?;
 
-        self.get_spotify_data(&path).await
+        // Update cache with fetched tracks
+        for track in &fetched_tracks.tracks {
+            let cache_key = format!("/tracks/{}/{}", track.id, market.unwrap_or_default());
+            self.update_cache(cache_key, serde_json::to_value(track)?).await;
+        }
+
+        // Combine cached tracks with fetched tracks before returning
+        let combined_tracks = [tracks_from_cache, fetched_tracks.tracks].concat();
+        Ok(TracksResponse { tracks: combined_tracks })
     }
 
     /// Fetches track recommendations based on specified criteria from the Spotify API.
@@ -584,9 +740,9 @@ impl SpotifyClientCredentials {
     /// # Examples
     ///
     /// ```
-    /// # use rustyspoty::{SpotifyClient, models::recommendations::RecommendationsRequest};
+    /// # use rustyspoty::{SpotifyClientCredentials, models::recommendations::RecommendationsRequest};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut spotify_client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut spotify_client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let mut request = RecommendationsRequest::new();
     /// request.seed_genres = Some(vec!["pop".to_string()]);
     /// request.limit = Some(10);
@@ -637,9 +793,9 @@ impl SpotifyClientCredentials {
     ///
     /// # Example
     /// ```
-    /// # use rustyspoty::SpotifyClient;
+    /// # use rustyspoty::SpotifyClientCredentials;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut client = SpotifyClient::new("client_id".to_string(), "client_secret".to_string());
+    /// # let mut client = SpotifyClientCredentials::new("client_id".to_string(), "client_secret".to_string());
     /// let playlist_id = "37i9dQZF1DXcBWIGoYBM5M";
     /// let playlist_info = client.get_playlist(playlist_id).await?;
     /// println!("Playlist Name: {}", playlist_info.name);

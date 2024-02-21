@@ -384,7 +384,8 @@ impl SpotifyClientCredentials {
     /// # }
     /// ```
     ///
-    /// This method provides an efficient way to access detailed album information, including links to high-quality cover art, making it essential for music-related applications and servicess.
+    /// This method provides an efficient way to access detailed album information,
+    /// including links to high-quality cover art, making it essential for music-related applications and servicess.
     pub async fn get_new_album_releases(
         &mut self,
         limit: Option<i32>,

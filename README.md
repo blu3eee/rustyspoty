@@ -23,7 +23,7 @@ Add `rustyspoty` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rustyspoty = { git = "https://github.com/bluesimp1102/rustyspoty.git" }
+rustyspoty = { git = "https://github.com/blu3eee/rustyspoty.git" }
 ```
 
 ## Usage
@@ -48,8 +48,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Contributing
 
-Contributions to rustyspoty are welcome! Whether it's bug reports, feature requests, or code contributions, please feel free to open an issue or submit a pull request on [GitHub](https://github.com/bluesimp1102/rustyspoty).
+Contributions to rustyspoty are welcome! Whether it's bug reports, feature requests, or code contributions, please feel free to open an issue or submit a pull request on [GitHub](https://github.com/blu3eee/rustyspoty).
 
 ## License
 
-[GPLv3](https://github.com/bluesimp1102/rustyspoty/blob/main/LICENSE)
+[GPLv3](https://github.com/blu3eee/rustyspoty/blob/main/LICENSE)
